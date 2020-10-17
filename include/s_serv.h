@@ -55,6 +55,7 @@ extern struct CapabilityIndex *cli_capindex;
 
 struct ClientCapability {
 	bool (*visible)(struct Client *);		/* whether or not to display the capability.  set to NULL or true return value = displayed */
+	bool (*attainable)(struct Client *);		/* whether or not to give this capability upon request.  set to NULL uses visible() */
 	const char *(*data)(struct Client *);		/* any custom data for the capability.  set to NULL or return NULL = no data */
 	unsigned int flags;
 };

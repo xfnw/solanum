@@ -81,6 +81,28 @@ clicap_visible(struct Client *client_p, const struct CapabilityEntry *cap)
 	return clicap->visible(client_p);
 }
 
+static inline int
+clicap_attainable(struct Client *client_p, const struct CapabilityEntry *cap)
+{
+	struct ClientCapability *clicap;
+
+	if (cap->flags & CAP_ORPHANED)
+		return 0;
+
+	if (cap->ownerdata == NULL)
+		return 1;
+
+	clicap = cap->ownerdata;
+
+	if (clicap->attainable != NULL)
+		return clicap->attainable(client_p);
+
+	if (clicap->visible != NULL)
+		return clicap->visible(client_p);
+
+	return 1;
+}
+
 /* clicap_find()
  *   Used iteratively over a buffer, extracts individual cap tokens.
  *
@@ -341,7 +363,7 @@ cap_req(struct Client *source_p, const char *arg)
 		}
 		else
 		{
-			if (!clicap_visible(source_p, cap))
+			if (!clicap_attainable(source_p, cap))
 			{
 				finished = 0;
 				break;
