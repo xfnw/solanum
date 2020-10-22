@@ -88,7 +88,7 @@ static const char um_callerid_desc[] =
 	"Provides usermodes +g and +G which restrict messages from unauthorized users.";
 
 static bool
-has_common_channel(struct Client *source_p, struct Client *target_p)
+has_allowing_channel(struct Client *source_p, struct Client *target_p)
 {
 	rb_dlink_node *ps, *pt;
 	struct membership *ms, *mt;
@@ -96,7 +96,7 @@ has_common_channel(struct Client *source_p, struct Client *target_p)
 
 	ITER_COMM_CHANNELS(ps, pt, source_p->user->channel.head, target_p->user->channel.head, ms, mt, chptr)
 	{
-		if (ms != NULL && mt != NULL)
+		if (ms != NULL && mt != NULL && can_send(chptr, source_p, ms) != CAN_SEND_NO)
 			return true;
 	}
 
@@ -112,7 +112,7 @@ allow_message(struct Client *source_p, struct Client *target_p)
 	if (!IsSetAnyCallerID(target_p))
 		return true;
 
-	if (IsSetRelaxedCallerID(target_p) && has_common_channel(source_p, target_p) && !IsSetStrictCallerID(target_p))
+	if (IsSetRelaxedCallerID(target_p) && has_allowing_channel(source_p, target_p) && !IsSetStrictCallerID(target_p))
 		return true;
 
 	if (IsServer(source_p))
