@@ -1503,3 +1503,163 @@ kill_client_serv_butone(struct Client *one, struct Client *target_p, const char 
 
 	rb_linebuf_donebuf(&rb_linebuf_id);
 }
+
+static struct Client *multiline_stashed_target_p;
+static char multiline_prefix[DATALEN+2]; /* allow for trailing space and null termination */
+static int multiline_prefix_len;
+static char multiline_separator[2];
+static int multiline_separator_len;
+static char *multiline_item_start;
+static char *multiline_cur;
+static int multiline_cur_len;
+static int multiline_remote_extra_space;
+
+bool
+sendto_one_multiline_init(struct Client *target_p, const char *separator, const char *format, ...)
+{
+	va_list args;
+
+	s_assert(multiline_stashed_target_p && "Multiline: didn't cleanup after last usage!");
+
+	va_start(args, format);
+	multiline_prefix_len = vsnprintf(multiline_prefix, sizeof multiline_prefix, format, args);
+	va_end(args);
+
+	if (multiline_prefix_len < 0 || multiline_prefix_len >= DATALEN)
+	{
+		s_assert(false && "Multiline: failure preparing prefix!");
+		return false;
+	}
+
+	multiline_stashed_target_p = target_p;
+	multiline_separator_len = rb_strlcpy(multiline_separator, separator, sizeof multiline_separator);
+	multiline_item_start = multiline_prefix + multiline_prefix_len;
+	multiline_cur = multiline_item_start;
+	multiline_cur_len = multiline_prefix_len;
+	multiline_remote_extra_space = 0;
+	return true;
+}
+
+bool
+sendto_one_multiline_remote_extra_space(struct Client *target_p, struct Client *client_p)
+{
+	ssize_t remote_extra_space;
+
+	if (target_p != multiline_stashed_target_p)
+	{
+		s_assert(false && "Multiline: missed init call!");
+		multiline_stashed_target_p = NULL;
+		return false;
+	}
+
+	remote_extra_space = strlen(client_p->name) - strlen(client_p->id);
+
+	if (remote_extra_space > 0)
+	{
+		multiline_remote_extra_space += remote_extra_space;
+	}
+
+	return true;
+}
+
+enum multiline_item_result
+sendto_one_multiline_item(struct Client *target_p, const char *format, ...)
+{
+	va_list args;
+	char item[DATALEN];
+	int item_len, res;
+	enum multiline_item_result ret = MULTILINE_SUCCESS;
+
+	if (target_p != multiline_stashed_target_p)
+	{
+		s_assert(false && "Multiline: missed init call!");
+		multiline_stashed_target_p = NULL;
+		return MULTILINE_FAILURE;
+	}
+
+	va_start(args, format);
+	item_len = vsnprintf(item, sizeof item, format, args);
+	va_end(args);
+
+	if (item_len < 0 || item_len >= DATALEN || multiline_prefix_len + multiline_remote_extra_space + item_len > DATALEN)
+	{
+		s_assert(false && "Multiline: failure preparing item!");
+		multiline_stashed_target_p = NULL;
+		return MULTILINE_FAILURE;
+	}
+
+	if (multiline_cur_len + item_len > DATALEN - multiline_remote_extra_space)
+	{
+		/* strip trailing separator */
+		multiline_cur[-multiline_separator_len] = '\0';
+		sendto_one(target_p, "%s", multiline_prefix);
+		multiline_cur_len = multiline_prefix_len;
+		multiline_cur = multiline_item_start;
+		ret = MULTILINE_WRAPPED;
+	}
+
+	res = snprintf(multiline_cur, sizeof multiline_prefix - (multiline_cur_len - multiline_prefix_len), "%s%s", item, multiline_separator);
+
+	if (res < 0)
+	{
+		s_assert(false && "Multiline: failure appending item!");
+		multiline_stashed_target_p = NULL;
+		return MULTILINE_FAILURE;
+	}
+
+	multiline_cur_len += res;
+	multiline_cur += res;
+	return ret;
+}
+
+bool
+sendto_one_multiline_fini(struct Client *target_p, const char *format, ...)
+{
+	va_list args;
+	char final[DATALEN];
+	int final_len;
+
+	if (target_p != multiline_stashed_target_p)
+	{
+		s_assert(false && "Multiline: missed init call!");
+		multiline_stashed_target_p = NULL;
+		return false;
+	}
+
+	if (multiline_cur_len == multiline_prefix_len)
+	{
+		multiline_stashed_target_p = NULL;
+		return true;
+	}
+
+	if (format)
+	{
+		va_start(args, format);
+		final_len = vsnprintf(final, sizeof final, format, args);
+		va_end(args);
+
+		if (final_len < 0 || final_len >= DATALEN || final_len > multiline_prefix_len)
+		{
+			s_assert(false && "Multiline: failure preparing final prefix!");
+			multiline_stashed_target_p = NULL;
+			return false;
+		}
+	}
+	else
+	{
+		rb_strlcpy(final, multiline_prefix, sizeof final);
+	}
+
+	/* strip trailing separator */
+	multiline_cur[-multiline_separator_len] = '\0';
+	sendto_one(target_p, "%s%s", final, multiline_item_start);
+
+	multiline_stashed_target_p = NULL;
+	return true;
+}
+
+void
+sendto_one_multiline_reset(void)
+{
+	multiline_stashed_target_p = NULL;
+}
