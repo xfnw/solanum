@@ -1519,7 +1519,7 @@ sendto_one_multiline_init(struct Client *target_p, const char *separator, const 
 {
 	va_list args;
 
-	s_assert(multiline_stashed_target_p && "Multiline: didn't cleanup after last usage!");
+	s_assert(!multiline_stashed_target_p && "Multiline: didn't cleanup after last usage!");
 
 	va_start(args, format);
 	multiline_prefix_len = vsnprintf(multiline_prefix, sizeof multiline_prefix, format, args);
@@ -1647,7 +1647,7 @@ sendto_one_multiline_fini(struct Client *target_p, const char *format, ...)
 	}
 	else
 	{
-		rb_strlcpy(final, multiline_prefix, sizeof final);
+		rb_strlcpy(final, multiline_prefix, multiline_prefix_len + 1);
 	}
 
 	/* strip trailing separator */
