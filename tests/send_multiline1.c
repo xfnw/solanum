@@ -29,6 +29,7 @@
 #include "s_serv.h"
 #include "monitor.h"
 #include "s_conf.h"
+#include "hash.h"
 
 #define MSG "%s:%d (%s)", __FILE__, __LINE__, __FUNCTION__
 
@@ -78,6 +79,52 @@ static void sendto_multiline_basic(void)
 	remove_local_person(user);
 }
 
+static void sendto_multiline_extra_space(void)
+{
+	struct Client *server = make_remote_server_full(&me, "remote.test", "777");
+	struct Client *luser = make_local_person();
+	struct Client *ruser = make_remote_person(server);
+	const char *s;
+
+	strcpy(ruser->id, "777000001");
+	add_to_id_hash(ruser->id, ruser);
+
+	/* ":me.test foo4567890123 local_test :" -> 22 + 13 = 35 */
+	sendto_one_multiline_init(luser, " ", ":%s foo4567890123 %s :",
+			get_id(&me, luser), get_id(luser, luser));
+	/* both of these should be noop, IMO */
+	//sendto_one_multiline_remote_extra_space(luser, &me);
+	//sendto_one_multiline_remote_extra_space(luser, luser);
+	/* so all this should fit on one line */
+	for (size_t i = 0; i < 28; i++)
+		sendto_one_multiline_item(luser, "item567890123456");
+	sendto_one_multiline_fini(luser, NULL);
+
+	s = get_client_sendq(luser);
+	is_int(512, strlen(s), MSG);
+	is_string("item567890123456\r\n", &s[494], MSG);
+	is_client_sendq_empty(luser, MSG);
+
+	/* as above, but remote_test is one longer */
+	sendto_one_multiline_init(ruser, " ", ":%s foo456789012 %s :",
+			get_id(&me, ruser), get_id(ruser, ruser));
+	/* should add "me.test" - 3 = 4 */
+	sendto_one_multiline_remote_extra_space(ruser, &me);
+	/* should add "remote_test" - 9 = 2 */
+	sendto_one_multiline_remote_extra_space(ruser, ruser);
+	/* so all this should fit on one line */
+	for (size_t i = 0; i < 28; i++)
+		sendto_one_multiline_item(ruser, "item567890123456");
+	/* and this shouldn't */
+	sendto_one_multiline_item(ruser, "x");
+	sendto_one_multiline_fini(ruser, NULL);
+
+	s = get_client_sendq(server);
+	is_int(506, strlen(s), MSG);
+	is_string("item567890123456\r\n", &s[488], MSG);
+	is_client_sendq(":0AA foo456789012 777000001 :x\r\n", server, MSG);
+}
+
 int main(int argc, char *argv[])
 {
 	plan_lazy();
@@ -86,6 +133,7 @@ int main(int argc, char *argv[])
 	client_util_init();
 
 	sendto_multiline_basic();
+	sendto_multiline_extra_space();
 
 	client_util_free();
 	ircd_util_free();
